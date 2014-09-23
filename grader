@@ -48,6 +48,7 @@ case object Fail extends Result
 trait Command
 
 case class Download(hw: String) extends Command
+case class Set(hw: String) extends Command
 case class Open(file: String) extends Command
 case object Compile extends Command
 case class Run(file: String) extends Command
@@ -58,6 +59,7 @@ case class Go(pos: Int) extends Command
 case class ApplyToAll(command: String) extends Command
 case object Ls extends Command
 case object Start extends Command
+case object When extends Command
 case object Exit extends Command
 case object Help extends Command
 case object Info extends Command
@@ -68,6 +70,7 @@ case object Bad extends Command
 
 class CommandParser extends JavaTokenParsers {
   def download: Parser[Command] = "download"~>".*".r^^(Download(_))
+  def set: Parser[Command] = "set"~>".*".r^^(Set(_))
   def open: Parser[Command] = "open"~>".*".r^^(Open(_))
   def compile: Parser[Command] = "compile"^^((x) => Compile)
   def run: Parser[Command] = "run"~>".*".r^^(Run(_))
@@ -81,14 +84,16 @@ class CommandParser extends JavaTokenParsers {
   def ls: Parser[Command] = "ls"^^((x) => Ls)
   def all: Parser[Command] = "all"~>".*".r^^(ApplyToAll(_)) 
   def info: Parser[Command] = "info"^^((x) => Info)
+  def when: Parser[Command] = "when"^^((x) => When)
   def exit: Parser[Command] = "exit"^^((x) => Exit)
   def help: Parser[Command] = "help"^^((x) => Help)
   def list: Parser[Command] = "list"^^((x) => AllRepos)
   def bad: Parser[Command] = ".*".r^^((x) => Bad)
 
   def parse: Parser[Command] = 
-    (download | open | all| compile | run | shell | go | nextSteps | 
-      next | prevSteps  | prev | exit | help | info | list | ls | bad)
+    (download | open | all | set | compile | run | shell | when | go | 
+      nextSteps | next | prevSteps  | prev | exit | help | info | list | 
+      ls | bad)
 
 
   def parseIt(str: String): Command = {
@@ -127,6 +132,13 @@ class Interpreter {
         repos.foreach((x) => {
           println(s"Checking out: ${x._2}...")
           s"""git -C ${x._2} pull""".run(pio).exitValue
+          s"""git --git-dir=${x._2}/.git 
+            --work-tree=${x._2} checkout tags/${hw}""".run(pio).exitValue
+        })
+        interpret(NoCommand, repos, offset, hw)
+      case Set(hw) =>
+        repos.foreach((x) => {
+          println(s"Checking out: ${x._2}...")
           s"""git --git-dir=${x._2}/.git 
             --work-tree=${x._2} checkout tags/${hw}""".run(pio).exitValue
         })
@@ -195,6 +207,14 @@ class Interpreter {
       case Shell(command) =>
         s"""${command}""".run(pio).exitValue
         interpret(NoCommand, repos, offset, homework)
+      case When =>
+        repos.get(offset) match {
+          case None => 
+            println("Bad position")
+          case Some(x) =>
+            s"git -C ${x} log -1 --format=%ai tags/${homework}".run(pio).exitValue
+        }
+        interpret(NoCommand, repos, offset, homework)
       case Open(file) =>
         repos.get(offset) match {
           case None => 
@@ -245,7 +265,9 @@ class Interpreter {
     | 14- compile: Compiles all haskell files in the homework directory
     | 15- run fileName: Runs the fileName
     | 16- !command: Runs command as a shell command
-    | 17- all cmd: Applies shell command (cmd) to all repositories""".stripMargin
+    | 17- all cmd: Applies shell command (cmd) to all repositories
+    | 18- when: prints the time when the tag of the current hw is creatd
+    | 18- set hw: checkout hw""".stripMargin
     
   private def help(): Unit = {
     println("Grader: Copyright(c) 2014 Amanj Sherwany - http://www.amanj.me")
@@ -260,7 +282,8 @@ class Interpreter {
 }
 
 
-val repos = new File(".").listFiles.filter(_.isDirectory).map(_.getName)
+val repos = new File(".").listFiles.filter((x) => 
+    x.isDirectory && !x.getName.startsWith(".")).map(_.getName)
 val reposMap = repos.zipWithIndex.foldLeft(TreeMap.empty: 
               TreeMap[Int, String])((z, y) => {
   z + (y._2 -> y._1)
