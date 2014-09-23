@@ -1,0 +1,269 @@
+#!/bin/sh
+  exec scala -save -feature "$0" "$@"
+!#
+
+/*
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2014 Amanj Sherwany - http://www.amanj.me
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+import scala.util.parsing.combinator._
+import scala.collection.immutable.TreeMap
+import sys.process._
+import scala.io._
+import java.io._
+import scala.language.postfixOps
+
+
+
+
+
+
+
+
+trait Result
+case object Success extends Result
+case object Fail extends Result
+
+// ASTs
+trait Command
+
+case class Download(hw: String) extends Command
+case class Open(file: String) extends Command
+case object Compile extends Command
+case class Run(file: String) extends Command
+case class Shell(command: String) extends Command
+case class Next(steps: Int) extends Command
+case class Previous(steps: Int) extends Command
+case class Go(pos: Int) extends Command
+case class ApplyToAll(command: String) extends Command
+case object Ls extends Command
+case object Start extends Command
+case object Exit extends Command
+case object Help extends Command
+case object Info extends Command
+case object AllRepos extends Command
+case object NoCommand extends Command
+case object Bad extends Command
+
+
+class CommandParser extends JavaTokenParsers {
+  def download: Parser[Command] = "download"~>".*".r^^(Download(_))
+  def open: Parser[Command] = "open"~>".*".r^^(Open(_))
+  def compile: Parser[Command] = "compile"^^((x) => Compile)
+  def run: Parser[Command] = "run"~>".*".r^^(Run(_))
+  def shell: Parser[Command] = "!"~>".*".r^^(Shell(_))
+  def go: Parser[Command] = "go"~>"\\d+".r^^((x) => Go(x.toInt))
+  def nextSteps: Parser[Command] = "next"~>"\\d+".r^^((x) => Next(x.toInt))
+  def next: Parser[Command] = "next"^^((x) => Next(1))
+  def prevSteps: Parser[Command] = ("prev"~>"\\d+".r | 
+      "previous"~>"\\d+".r )^^((x) => Previous(x.toInt))
+  def prev: Parser[Command] = ("prev" | "previous")^^((x) => Previous(1))
+  def ls: Parser[Command] = "ls"^^((x) => Ls)
+  def all: Parser[Command] = "all"~>".*".r^^(ApplyToAll(_)) 
+  def info: Parser[Command] = "info"^^((x) => Info)
+  def exit: Parser[Command] = "exit"^^((x) => Exit)
+  def help: Parser[Command] = "help"^^((x) => Help)
+  def list: Parser[Command] = "list"^^((x) => AllRepos)
+  def bad: Parser[Command] = ".*".r^^((x) => Bad)
+
+  def parse: Parser[Command] = 
+    (download | open | all| compile | run | shell | go | nextSteps | 
+      next | prevSteps  | prev | exit | help | info | list | ls | bad)
+
+
+  def parseIt(str: String): Command = {
+    val r = parseAll(parse, str)
+    r.get
+  }
+}
+
+
+class Interpreter { 
+
+  private val sp = File.separator
+
+  private val parser = new CommandParser
+
+  private def dumb(o: OutputStream) = {}
+  private def read(in: InputStream) = {
+    var lines = Source.fromInputStream(in).getLines().mkString("\n")
+    println(lines)
+  }
+
+  private val pio = new ProcessIO(dumb, read, read)
+
+
+  private def readCommand: Command = {
+    val input = scala.io.StdIn.readLine("command> ")
+    parser.parseIt(input)
+  }
+
+  private def interpret(command: Command,
+                repos: Map[Int, String],
+                offset: Int,
+                homework: String): Result = {
+    command match {
+      case Download(hw) =>
+        repos.foreach((x) => {
+          println(s"Checking out: ${x._2}...")
+          s"""git -C ${x._2} pull""".run(pio).exitValue
+          s"""git --git-dir=${x._2}/.git 
+            --work-tree=${x._2} checkout tags/${hw}""".run(pio).exitValue
+        })
+        interpret(NoCommand, repos, offset, hw)
+      case AllRepos =>
+        println("Available repositories")
+        repos.foreach((x) => println(s"${x._1}: ${x._2}"))
+        interpret(NoCommand, repos, offset, homework)
+      case Go(x) if x < 0 || x >= repos.size =>
+        println("Error: cannot go there")
+        interpret(NoCommand, repos, offset, homework)
+      case Go(x) =>
+        interpret(NoCommand, repos, x, homework)
+      case Next(x) if (offset + x) >= repos.size =>
+        println("Error: cannot go there, too ahead")
+        interpret(NoCommand, repos, offset, homework)
+      case Next(x) =>
+        interpret(NoCommand, repos, offset + x, homework)
+      case Previous(x) if (offset - x) < 0 =>
+        println("Error: cannot go there, too behind")
+        interpret(NoCommand, repos, offset, homework)
+      case Previous(x) =>
+        interpret(NoCommand, repos, offset - x, homework)
+      case NoCommand => 
+        interpret(readCommand, repos, offset, homework)
+      case Start =>
+        interpret(NoCommand, repos, offset, homework)
+      case Ls =>
+        repos.get(offset) match {
+          case None => 
+            println("Bad position")
+          case Some(x) =>
+            s"ls -al ${x}${sp}${homework}".run(pio).exitValue
+        }
+        interpret(NoCommand, repos, offset, homework)
+      case Info =>
+        repos.get(offset) match {
+          case None =>
+            println("Bad position")
+          case Some(x) => println(x)
+        }
+        interpret(NoCommand, repos, offset, homework)
+      case Help =>
+        help()
+        interpret(NoCommand, repos, offset, homework)
+      case Exit => 
+        checkoutMaster(repos)
+        Success
+      case Compile =>
+        interpret(NoCommand, repos, offset, homework)
+        repos.get(offset) match {
+          case None => 
+            println("Bad position")
+          case Some(x) =>
+            s"ghc ${x}${sp}${homework}${sp}*.hs".run(pio).exitValue
+        }
+        interpret(NoCommand, repos, offset, homework)
+      case Run(file) =>
+        repos.get(offset) match {
+          case None => 
+            println("Bad position")
+          case Some(x) =>
+            s"${x}${sp}${homework}${sp}${file}".run(pio).exitValue
+        }
+        interpret(NoCommand, repos, offset, homework)
+      case Shell(command) =>
+        s"""${command}""".run(pio).exitValue
+        interpret(NoCommand, repos, offset, homework)
+      case Open(file) =>
+        repos.get(offset) match {
+          case None => 
+            println("Bad position")
+          case Some(x) =>
+            file match {
+              case "dir" =>
+                s"open ${x}${sp}${homework}".run(pio).exitValue
+              case _ =>
+                s"open ${x}${sp}${homework}${sp}${file}".run(pio).exitValue
+            }
+        }
+        interpret(NoCommand, repos, offset, homework)
+      case ApplyToAll(cmd) =>
+        repos.foreach((x) => {
+          s"""${cmd}""".run(pio).exitValue
+        })
+        interpret(NoCommand, repos, offset, homework)
+      case Bad =>
+        println("Unknown command")
+        println(knownCommands)
+        interpret(NoCommand, repos, offset, homework)
+    }
+  }
+
+  private def checkoutMaster(repos: Map[Int, String]): Unit = {
+    repos.foreach((x) => {
+      println(s"Checking out: ${x._2}...")
+      s"""git --git-dir=${x._2}/.git 
+        --work-tree=${x._2} checkout master""".run(pio).exitValue
+    })
+  }
+
+  private val knownCommands = """|Available Commands: 
+    | 1- download hw: Pulls all the repositories, and checksout tag hw
+    | 2- go pos: Moves the cursor to repository number pos
+    | 3- next: Moves to the next repo
+    | 4- next stepsInt: Moves stepsInt repoistories forward
+    | 5- previous or prev: Moves one repo backward
+    | 6- previous stepsInt or prev stepsInt: Moves stepsInt repo backward
+    | 7- help: Prints help message
+    | 8- exit: Checksout master for all repos, and exits the program
+    | 9- open dir: Opens the directory that contains the homework
+    | 10- open fileName: Opens the given file in the homework directory
+    | 11- list: Lists all available repositories, with their indices
+    | 12- ls: Lists all files under the homework directory
+    | 13- info: Prints the current repository
+    | 14- compile: Compiles all haskell files in the homework directory
+    | 15- run fileName: Runs the fileName
+    | 16- !command: Runs command as a shell command
+    | 17- all cmd: Applies shell command (cmd) to all repositories""".stripMargin
+    
+  private def help(): Unit = {
+    println("Grader: Copyright(c) 2014 Amanj Sherwany - http://www.amanj.me")
+    println("This program helps with grading assignments\n\n")
+    println(knownCommands)
+  }
+
+
+  def start(): Result = {
+    interpret(Start, reposMap, 0, "")
+  }
+}
+
+
+val repos = new File(".").listFiles.filter(_.isDirectory).map(_.getName)
+val reposMap = repos.zipWithIndex.foldLeft(TreeMap.empty: 
+              TreeMap[Int, String])((z, y) => {
+  z + (y._2 -> y._1)
+})
+val interpreter = new Interpreter
+interpreter.start
