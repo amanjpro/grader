@@ -1,5 +1,5 @@
 #!/bin/sh
-  exec scala -save -feature "$0" "$@"
+  exec scala -cp jline-2.12.jar -save -feature "$0" "$@"
 !#
 
 /*
@@ -26,6 +26,8 @@
  * THE SOFTWARE.
  */
 
+import jline.console.ConsoleReader
+import jline.console.completer.StringsCompleter
 import scala.util.parsing.combinator._
 import scala.collection.immutable.TreeMap
 import sys.process._
@@ -68,28 +70,50 @@ case object AllRepos extends Command
 case object NoCommand extends Command
 case object Bad extends Command
 
+object Commands {
+  val download = "download"
+  val set = "set"
+  val open = "open"
+  val compile = "compile"
+  val run = "run"
+  val go = "go"
+  val next = "next"
+  val prev = "prev"
+  val previous = "previous"
+  val ls = "ls"
+  val all = "all"
+  val info = "info"
+  val when = "when"
+  val tags = "tags"
+  val exit = "exit"
+  val help = "help"
+  val list = "list"
+}
+
 
 class CommandParser extends JavaTokenParsers {
-  def download: Parser[Command] = "download"~>".*".r^^(Download(_))
-  def set: Parser[Command] = "set"~>".*".r^^(Set(_))
-  def open: Parser[Command] = "open"~>".*".r^^(Open(_))
-  def compile: Parser[Command] = "compile"^^((x) => Compile)
-  def run: Parser[Command] = "run"~>".*".r^^(Run(_))
+  def download: Parser[Command] = Commands.download~>".*".r^^(Download(_))
+  def set: Parser[Command] = Commands.set~>".*".r^^(Set(_))
+  def open: Parser[Command] = Commands.open~>".*".r^^(Open(_))
+  def compile: Parser[Command] = Commands.compile^^((x) => Compile)
+  def run: Parser[Command] = Commands.run~>".*".r^^(Run(_))
   def shell: Parser[Command] = "!"~>".*".r^^(Shell(_))
-  def go: Parser[Command] = "go"~>"\\d+".r^^((x) => Go(x.toInt))
-  def nextSteps: Parser[Command] = "next"~>"\\d+".r^^((x) => Next(x.toInt))
-  def next: Parser[Command] = "next"^^((x) => Next(1))
-  def prevSteps: Parser[Command] = ("prev"~>"\\d+".r | 
-      "previous"~>"\\d+".r )^^((x) => Previous(x.toInt))
-  def prev: Parser[Command] = ("prev" | "previous")^^((x) => Previous(1))
-  def ls: Parser[Command] = "ls"^^((x) => Ls)
-  def all: Parser[Command] = "all"~>".*".r^^(ApplyToAll(_)) 
-  def info: Parser[Command] = "info"^^((x) => Info)
-  def when: Parser[Command] = "when"^^((x) => When)
-  def tags: Parser[Command] = "tags"^^((x) => When)
-  def exit: Parser[Command] = "exit"^^((x) => Exit)
-  def help: Parser[Command] = "help"^^((x) => Help)
-  def list: Parser[Command] = "list"^^((x) => AllRepos)
+  def go: Parser[Command] = Commands.go~>"\\d+".r^^((x) => Go(x.toInt))
+  def nextSteps: Parser[Command] = Commands.next~>"\\d+".r^^(
+      (x) => Next(x.toInt))
+  def next: Parser[Command] = Commands.next^^((x) => Next(1))
+  def prevSteps: Parser[Command] = (Commands.prev~>"\\d+".r | 
+      Commands.previous~>"\\d+".r )^^((x) => Previous(x.toInt))
+  def prev: Parser[Command] = (Commands.prev | 
+      Commands.previous)^^((x) => Previous(1))
+  def ls: Parser[Command] = Commands.ls^^((x) => Ls)
+  def all: Parser[Command] = Commands.all~>".*".r^^(ApplyToAll(_)) 
+  def info: Parser[Command] = Commands.info^^((x) => Info)
+  def when: Parser[Command] = Commands.when^^((x) => When)
+  def tags: Parser[Command] = Commands.tags^^((x) => Tags)
+  def exit: Parser[Command] = Commands.exit^^((x) => Exit)
+  def help: Parser[Command] = Commands.help^^((x) => Help)
+  def list: Parser[Command] = Commands.list^^((x) => AllRepos)
   def bad: Parser[Command] = ".*".r^^((x) => Bad)
 
   def parse: Parser[Command] = 
@@ -107,7 +131,21 @@ class CommandParser extends JavaTokenParsers {
 
 class Interpreter { 
 
+  // var ttyConfig = ""
+
   private val sp = File.separator
+
+  private val reader = new ConsoleReader
+
+  reader.setPrompt("command> ")
+  private val completers = new StringsCompleter(Commands.download, Commands.set, 
+                                Commands.open, Commands.compile, Commands.run, 
+                                Commands.go, Commands.next, Commands.previous, 
+                                Commands.ls, Commands.all, Commands.info, 
+                                Commands.when, Commands.tags, Commands.exit, 
+                                Commands.help, Commands.list)
+
+  reader.addCompleter(completers)
 
   private val parser = new CommandParser
 
@@ -121,7 +159,8 @@ class Interpreter {
 
 
   private def readCommand: Command = {
-    val input = scala.io.StdIn.readLine("command> ")
+    
+    val input = reader.readLine()
     parser.parseIt(input)
   }
 
@@ -133,6 +172,7 @@ class Interpreter {
       case Download(hw) =>
         repos.foreach((x) => {
           println(s"Checking out: ${x._2}...")
+          s"""git -C ${x._2} fetch -tags""".run(pio).exitValue
           s"""git -C ${x._2} pull""".run(pio).exitValue
           s"""git --git-dir=${x._2}/.git 
             --work-tree=${x._2} checkout tags/${hw}""".run(pio).exitValue
@@ -222,7 +262,7 @@ class Interpreter {
           case None => 
             println("Bad position")
           case Some(x) =>
-            s"git -C ${x} tags".run(pio).exitValue
+            s"git -C ${x} tag".run(pio).exitValue
         }
         interpret(NoCommand, repos, offset, homework)
       case Open(file) =>
