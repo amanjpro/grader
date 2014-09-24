@@ -60,6 +60,7 @@ case class ApplyToAll(command: String) extends Command
 case object Ls extends Command
 case object Start extends Command
 case object When extends Command
+case object Tags extends Command
 case object Exit extends Command
 case object Help extends Command
 case object Info extends Command
@@ -85,6 +86,7 @@ class CommandParser extends JavaTokenParsers {
   def all: Parser[Command] = "all"~>".*".r^^(ApplyToAll(_)) 
   def info: Parser[Command] = "info"^^((x) => Info)
   def when: Parser[Command] = "when"^^((x) => When)
+  def tags: Parser[Command] = "tags"^^((x) => When)
   def exit: Parser[Command] = "exit"^^((x) => Exit)
   def help: Parser[Command] = "help"^^((x) => Help)
   def list: Parser[Command] = "list"^^((x) => AllRepos)
@@ -93,7 +95,7 @@ class CommandParser extends JavaTokenParsers {
   def parse: Parser[Command] = 
     (download | open | all | set | compile | run | shell | when | go | 
       nextSteps | next | prevSteps  | prev | exit | help | info | list | 
-      ls | bad)
+      tags | ls | bad)
 
 
   def parseIt(str: String): Command = {
@@ -215,6 +217,14 @@ class Interpreter {
             s"git -C ${x} log -1 --format=%ai tags/${homework}".run(pio).exitValue
         }
         interpret(NoCommand, repos, offset, homework)
+      case Tags =>
+        repos.get(offset) match {
+          case None => 
+            println("Bad position")
+          case Some(x) =>
+            s"git -C ${x} tags".run(pio).exitValue
+        }
+        interpret(NoCommand, repos, offset, homework)
       case Open(file) =>
         repos.get(offset) match {
           case None => 
@@ -267,7 +277,8 @@ class Interpreter {
     | 16- !command: Runs command as a shell command
     | 17- all cmd: Applies shell command (cmd) to all repositories
     | 18- when: prints the time when the tag of the current hw is creatd
-    | 18- set hw: checkout hw""".stripMargin
+    | 19- tags: prints the tags of the current student
+    | 20- set hw: checkout hw""".stripMargin
     
   private def help(): Unit = {
     println("Grader: Copyright(c) 2014 Amanj Sherwany - http://www.amanj.me")
