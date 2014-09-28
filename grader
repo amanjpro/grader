@@ -76,6 +76,7 @@ object Commands {
   val open = "open"
   val compile = "compile"
   val run = "run"
+  val shell = ":sh"
   val go = "go"
   val next = "next"
   val prev = "prev"
@@ -97,7 +98,7 @@ class CommandParser extends JavaTokenParsers {
   def open: Parser[Command] = Commands.open~>".*".r^^(Open(_))
   def compile: Parser[Command] = Commands.compile^^((x) => Compile)
   def run: Parser[Command] = Commands.run~>".*".r^^(Run(_))
-  def shell: Parser[Command] = "!"~>".*".r^^(Shell(_))
+  def shell: Parser[Command] = Commands.shell~>".*".r^^(Shell(_))
   def go: Parser[Command] = Commands.go~>"\\d+".r^^((x) => Go(x.toInt))
   def nextSteps: Parser[Command] = Commands.next~>"\\d+".r^^(
       (x) => Next(x.toInt))
@@ -143,7 +144,7 @@ class Interpreter {
                                 Commands.go, Commands.next, Commands.previous, 
                                 Commands.ls, Commands.all, Commands.info, 
                                 Commands.when, Commands.tags, Commands.exit, 
-                                Commands.help, Commands.list)
+                                Commands.help, Commands.list, Commands.shell)
 
   reader.addCompleter(completers)
 
@@ -314,7 +315,7 @@ class Interpreter {
     | 13- info: Prints the current repository
     | 14- compile: Compiles all haskell files in the homework directory
     | 15- run fileName: Runs the fileName
-    | 16- !command: Runs command as a shell command
+    | 16- :sh command: Runs command as a shell command
     | 17- all cmd: Applies shell command (cmd) to all repositories
     | 18- when: prints the time when the tag of the current hw is creatd
     | 19- tags: prints the tags of the current student
