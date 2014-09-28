@@ -173,7 +173,7 @@ class Interpreter {
       case Download(hw) =>
         repos.foreach((x) => {
           println(s"Checking out: ${x._2}...")
-          s"""git -C ${x._2} fetch -tags""".run(pio).exitValue
+          s"""git -C ${x._2} fetch --tags""".run(pio).exitValue
           s"""git -C ${x._2} pull""".run(pio).exitValue
           s"""git --git-dir=${x._2}/.git 
             --work-tree=${x._2} checkout tags/${hw}""".run(pio).exitValue
