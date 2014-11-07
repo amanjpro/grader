@@ -59,6 +59,7 @@ case class Next(steps: Int) extends Command
 case class Previous(steps: Int) extends Command
 case class Go(pos: Int) extends Command
 case class ApplyToAll(command: String) extends Command
+case class CpAll(src: String, dst: String) extends Command
 case object Ls extends Command
 case object Clear extends Command
 case object Start extends Command
@@ -91,6 +92,7 @@ object Commands {
   val exit = "exit"
   val help = "help"
   val list = "list"
+  val cpall = "cpall"
 }
 
 
@@ -111,6 +113,10 @@ class CommandParser extends JavaTokenParsers {
       Commands.previous)^^((x) => Previous(1))
   def ls: Parser[Command] = Commands.ls^^((x) => Ls)
   def all: Parser[Command] = Commands.all~>".*".r^^(ApplyToAll(_)) 
+  def cpall: Parser[Command] = 
+    Commands.cpall~>"[^ \n\r\t]*".r~"[^ \n\r\t]".r^^({
+      case a~b => CpAll(a, b)
+    })
   def info: Parser[Command] = Commands.info^^((x) => Info)
   def when: Parser[Command] = Commands.when^^((x) => When)
   def tags: Parser[Command] = Commands.tags^^((x) => Tags)
@@ -122,8 +128,8 @@ class CommandParser extends JavaTokenParsers {
 
   def parse: Parser[Command] = 
     (download | open | all | set | compile | run | shell | when | go | 
-      nextSteps | next | prevSteps  | prev | exit | help | info | list | 
-      tags | ls | clear | bad)
+      nextSteps | cpall | next | prevSteps  | prev | exit | help | info | 
+      list | tags | ls | clear | bad)
 
 
   def parseIt(str: String): Command = {
@@ -148,7 +154,7 @@ class Interpreter {
                                 Commands.ls, Commands.all, Commands.info, 
                                 Commands.when, Commands.tags, Commands.exit, 
                                 Commands.help, Commands.list, Commands.shell,
-                                Commands.clear)
+                                Commands.clear, Commands.cpall)
 
   reader.addCompleter(completers)
 
@@ -195,7 +201,16 @@ class Interpreter {
         interpret(NoCommand, repos, offset, homework)
       case AllRepos =>
         println("Available repositories")
-        repos.foreach((x) => println(s"${x._1}: ${x._2}"))
+        repos.foreach((x) => if(x._1 == offset) {
+            println(s"[${x._1}]: ${x._2}")
+          } else {
+            println(s"${x._1}: ${x._2}")
+          })
+        interpret(NoCommand, repos, offset, homework)
+      case CpAll(s, d) =>
+        repos.foreach((x) => {
+          s"""mv ${s} ${x}/${d}""".run(pio).exitValue
+        })
         interpret(NoCommand, repos, offset, homework)
       case Go(x) if x < 0 || x >= repos.size =>
         println("Error: cannot go there")
@@ -327,7 +342,8 @@ class Interpreter {
     | 18- when: prints the time when the tag of the current hw is creatd
     | 19- tags: prints the tags of the current student
     | 20- set hw: checkout hw
-    | 20- clear: clears the screen""".stripMargin
+    | 21- cpall src dest: copies src to all repositories
+    | 22- clear: clears the screen""".stripMargin
     
   private def help(): Unit = {
     println("Grader: Copyright(c) 2014 Amanj Sherwany - http://www.amanj.me")
