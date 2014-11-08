@@ -114,7 +114,7 @@ class CommandParser extends JavaTokenParsers {
   def ls: Parser[Command] = Commands.ls^^((x) => Ls)
   def all: Parser[Command] = Commands.all~>".*".r^^(ApplyToAll(_)) 
   def cpall: Parser[Command] = 
-    Commands.cpall~>"[^ \n\r\t]*".r~"[^ \n\r\t]".r^^({
+    (Commands.cpall~>ws~>"[^ \t]".r)~(ws~>"[^ \t]".r)^^({
       case a~b => CpAll(a, b)
     })
   def info: Parser[Command] = Commands.info^^((x) => Info)
@@ -125,6 +125,7 @@ class CommandParser extends JavaTokenParsers {
   def list: Parser[Command] = Commands.list^^((x) => AllRepos)
   def clear: Parser[Command] = Commands.clear^^((x) => Clear)
   def bad: Parser[Command] = ".*".r^^((x) => Bad)
+  def ws: Parser[String] = " *".r
 
   def parse: Parser[Command] = 
     (download | open | all | set | compile | run | shell | when | go | 
@@ -209,7 +210,7 @@ class Interpreter {
         interpret(NoCommand, repos, offset, homework)
       case CpAll(s, d) =>
         repos.foreach((x) => {
-          s"""mv ${s} ${x}/${d}""".run(pio).exitValue
+          s"""cp -r ${s} ${x}/${d}""".run(pio).exitValue
         })
         interpret(NoCommand, repos, offset, homework)
       case Go(x) if x < 0 || x >= repos.size =>
